@@ -2,6 +2,9 @@ from notebookutils import mssparkutils
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, FloatType, BooleanType
 import json
 import csv
+from datetime import datetime
+
+
 
 CRITICAL = 50
 ERROR = 40
@@ -27,7 +30,7 @@ _nameToLevel = {
     'NOTSET': NOTSET,
 }
 
-_datatypeConversions = {
+_datatypeConversion = {
     "<class 'int'>" : IntegerType(),
     "<class 'float'>" : FloatType(),  
     "<class 'str'>" : StringType(),
@@ -56,30 +59,6 @@ def getLevelName(level):
     if result is not None:
         return result
     return "Level %s" % level
-
-class HandlerBase:
-
-    def __init__(self, tablename, level=NOTSET, abfs_path='',  schema_evolution_enabled=True):
-        self._name = None
-        self.level = _checkLevel(level)
-        self.abfs_path = abfs_path
-        self.schema_evolution_enabled = schema_evolution_enabled
-        
-    
-    def setLevel(self, level):
-        self.level = _checkLevel(level)
-
-    def handle(self, record):
-        rv = record
-        if isinstance(rv, LogRecord):
-            record = rv
-        if rv:
-            self.emit(record)
-        return rv
-    
-    def emit(self, record):
-        raise NotImplementedError('emit must be implemented '
-                                  'by Handler subclasses')
 
 class Filter():
     def __init__(self, name):
@@ -157,14 +136,10 @@ class FabricLogger():
         for hdlr in c.handlers:
             if record.levelnumber >= hdlr.level:
                 hdlr.handle(record)
-            #if not c.propagate:
-            #    c = None    #break out
-
-
+                
 class LogRecord:
 
     def __init__(self, name, level, message, **kwargs):
-        #ct = time.time_ns()
         self.name = name
         self.message = message
         self.levelname = getLevelName(level)
@@ -173,105 +148,84 @@ class LogRecord:
 
     def return_as_dict(self):
         LogRecord_as_dict = {
-            'name': self.name,
-            'message': self.message,
-            'levelname': self.levelname,
-            'levelnumber': self.levelnumber
+            'name': {"value":self.name, "dtype":"<class 'str'>"},
+            'message': {"value":self.message, "dtype":"<class 'str'>"},
+            'levelname': {"value":self.levelname, "dtype":"<class 'str'>"},
+            'levelnumber': {"value":self.levelnumber, "dtype":"<class 'int'>"},
         }
-        LogRecord_as_dict.update(self.kwargs)
+        LogRecord_as_dict.update({str(key):{value:v, dtype: str(type(v))} for (key,v) in self.kwargs.items()})
 
         return LogRecord_as_dict
     
+    #def return_as_table(self): 
+    #    mssparkutils.fs.put(self.full_path, "")
+
     def list_schema(self):
-        schema = self.return_as_dict().keys()
-        return list(schema)
+        return self.return_as_dict().keys()
 
     def list_values(self):
-        values = self.return_as_dict().values()
-        return list(values)
+        return [d["value"] for d in self.return_as_dict().values()]
 
-    def infer_LogRecord_schema(self):
-        variable = 1
+class CSVHandler:
 
-class DeltaTableHandler(HandlerBase):
-
-    def __init__(self, tablename):
-        self.tablename = tablename
-        self.full_path = abfs_path + "/" + tablename
-
-
-    def delta_table_exists(self, path, tablename):
-        files = mssparkutils.fs.ls(path)
-        for file in files:
-            if file.name == tablename:
-                return True
-
-        return False
-
-    def get_delta_table_schema_names(self, path):
-        df = spark.read.format("delta").load(path)
-        schema = df.schema
-        field_names = [field.name for field in schema.fields]
-        return field_names
-
-    def get_delta_table_schema(self, path):
-        df = spark.read.format("delta").load(path)
-        schema = df.schema
-
-        return schema
-
-    def schema_compare(self, record, delta_schema):
-        return record.list_schema() != delta_schema
-
-    def emit(self, record):
-        
-        # Creates a delta table if it does not exist
-        if not self.delta_table_exists(self.abfs_path, self.tablename):
-            schema = StructType([
-                StructField(f"{column}", StringType(), True) if column != "levelnumber" else StructField(f"{column}", IntegerType(), True) for column in record.list_schema() 
-            ])
-
-            df = spark.createDataFrame(data = [], schema = schema)
-            df.write.format("delta").mode("overwrite").save(self.full_path)
-
-        df_to_insert = spark.createDataFrame(data=[record.list_values()], schema=self.get_delta_table_schema(self.full_path))
-        
-        print(self.schema_compare(record, self.get_delta_table_schema_names(self.full_path)))
-        #Checks if the schema of the record matches the schema of the delta table
-        if self.schema_compare(record, self.get_delta_table_schema_names(self.full_path)): 
-            #If schema evolution is allowed for the table it will evolutionize the schema and insert the data
-            if self.schema_evolution_enabled: 
-                df_to_insert.write.format("delta").mode("append").option("mergeSchema", "true").save(self.full_path)
-            else: 
-                raise Exception(f"Schema evolution necessary but was set to {self.schema_evolution_enabled}")
-        else:
-            print(self.get_delta_table_schema(self.full_path))
-            print(df_to_insert.schema)
-            df_to_insert.write.format("delta").mode("append").save(self.full_path)
-
-class CSVHandler(HandlerBase):
-
-    def __init__(self, file_name, mode, abfs_path, level=NOTSET):
+    def __init__(self, handler_name, file_name = "", path = "", delta_table = "",level=NOTSET):
         self.level = level
-        self.file_name = file_name
-        self.mode = mode
-        self.abfs_path = abfs_path
-        self.full_path = self.abfs_path + "/" + self.file_name
-    
+        self.handler_name = handler_name
+
+        if not file_name:
+            self.file_name = f"/{handler_name}_{datetime.today().strftime('%Y-%m-%d')}.csv"
+        else:
+            self.file_name = file_name
+
+        if not path:
+            self.path = f"Files/LogHandler/{self.handler_name}"
+        else:
+            self.path = path
+
+        self.full_path = self.path + self.file_name
+
+        if not delta_table:
+            self.delta_table = self.handler_name
+        else:
+            self.delta_table = delta_table
+
+    def handle(self, record):
+        rv = record
+        if isinstance(rv, LogRecord):
+            record = rv
+        if rv:
+            self.emit(record)
+        return rv
+
     def check_if_log_file_exists(self, full_path):     
         return mssparkutils.fs.exists(full_path)
 
     def emit(self, record):
         if not self.check_if_log_file_exists(self.full_path):
-            mssparkutils.fs.put(self.full_path, "")
-            
+            mssparkutils.fs.put(self.full_path, self.create_csv_header(record.list_schema())) 
+
         mssparkutils.fs.append(self.full_path, """\n""" + str(record.list_values()), True)
 
-    def commmit_to_delta(self, filter):
-        variable = 1
-    
+    def create_csv_header(self, record_headers,delimiter = ","):
+        return delimiter.join(record_headers)
 
-class StructuredStreamHandler(HandlerBase):
+    def commit_csv_to_delta(self, fiilter=""):
+        
+        if not self.check_if_log_file_exists(self.full_path):
+            raise Exception("Cannot find CSV to commit.")
+
+        tables = mssparkutils.fs.ls("Tables/")
+        if self.delta_table not in [table.name for table in tables]: 
+            df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
+            df.write.format("delta").mode("overwrite").save(f"Tables/{self.delta_table}")
+        else:
+            df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
+            #df.where(fiilter)
+            df.write.format("delta").option("inferSchema", "true").mode("append").save(f"Tables/{self.delta_table}")
+        
+class StructuredStreamHandler():
 
     def __init__(self, abfs_path):
         self.abfs_path = abfs_path
+
+
