@@ -205,14 +205,8 @@ class CSVHandler:
         if not self.check_if_log_file_exists(self.full_path):
             raise Exception("Cannot find CSV to commit.")
 
-        tables = mssparkutils.fs.ls("Tables/")
-        if self.delta_table not in [table.name for table in tables]: 
-            df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
-            df.write.format("delta").mode("overwrite").save(f"Tables/{self.delta_table}")
-        else:
-            df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
-            #df.where(fiilter)
-            df.write.format("delta").option("inferSchema", "true").mode("append").save(f"Tables/{self.delta_table}")
+        df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
+        df.write.format("delta").mode("overwrite").save(f"Tables/{self.delta_table}")
         
 class StructuredStreamHandler():
 
