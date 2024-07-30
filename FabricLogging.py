@@ -194,8 +194,8 @@ class CSVHandler:
     def emit(self, record):
         if not self.check_if_log_file_exists(self.full_path):
             mssparkutils.fs.put(self.full_path, self.create_csv_header(record.list_schema())) 
-
-        mssparkutils.fs.append(self.full_path, """\n""" + str(record.list_values()), True)
+            
+       mssparkutils.fs.append(self.full_path, """\n""" + ",".join(str(value) for value in record.list_values()), True)
 
     def create_csv_header(self, record_headers,delimiter = ","):
         return delimiter.join(record_headers)
