@@ -30,15 +30,6 @@ _nameToLevel = {
     'NOTSET': NOTSET,
 }
 
-_datatypeConversion = {
-    "<class 'int'>" : IntegerType(),
-    "<class 'float'>" : FloatType(),  
-    "<class 'str'>" : StringType(),
-    "<class 'bool'>" : BooleanType(),
-    "<class 'list'>" : StringType(),
-    "<class 'dict'>" : StringType()
-}
-
 def _checkLevel(level):
     if isinstance(level, int):
         rv = level
