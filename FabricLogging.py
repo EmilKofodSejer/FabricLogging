@@ -4,8 +4,6 @@ import json
 import csv
 from datetime import datetime
 
-
-
 CRITICAL = 50
 ERROR = 40
 WARNING = 30
@@ -35,7 +33,7 @@ def _checkLevel(level):
         rv = level
     elif str(level) == level:
         if level not in _nameToLevel:
-            raise ValueError("Unknown level: %r" % level)
+            raise ValueError(f"Unknown level:{level}")
         rv = _nameToLevel[level]
     else:
         raise TypeError("Level not an integer or a valid string: %r"
@@ -49,23 +47,73 @@ def getLevelName(level):
     result = _nameToLevel.get(level)
     if result is not None:
         return result
-    return "Level %s" % level
+    return f"Level {level}"
 
 class Filter():
     def __init__(self, name):
         self.name = name
 
+class CSVHandler:
+
+    def __init__(self, handler_name, file_name = "", path = "", level=NOTSET):
+        self.level = level
+        self.handler_name = handler_name
+
+        if not file_name:
+            self.file_name = f"/{handler_name}_{datetime.today().strftime('%Y-%m-%d')}.csv"
+        else:
+            self.file_name = file_name
+
+        if not path:
+            self.path = f"Files/LogHandler/{self.handler_name}"
+        else:
+            self.path = path
+
+        self.full_path = self.path + self.file_name
+
+    def handle(self, record):
+        rv = record
+        if isinstance(rv, LogRecord):
+            record = rv
+        if rv:
+            self.emit(record)
+        return rv
+
+    def check_if_log_file_exists(self, full_path):     
+        return mssparkutils.fs.exists(full_path)
+
+    def emit(self, record):
+        if not self.check_if_log_file_exists(self.full_path):
+            mssparkutils.fs.put(self.full_path, self.create_csv_header(record.list_schema())) 
+
+        mssparkutils.fs.append(self.full_path, """\n""" + ",".join(str(value) for value in record.list_values()), True)
+
+    def create_csv_header(self, record_headers,delimiter = ","):
+        return delimiter.join(record_headers)
+
+    def commit_csv_to_delta(self, delta_table=""):
+        
+        if not self.check_if_log_file_exists(self.full_path):
+            raise Exception("Cannot find CSV to commit.")
+        
+        if not delta_table:
+            delta_table = self.handler_name
+
+        df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
+        df.write.format("delta").mode("overwrite").save(f"Tables/{delta_table}")
+
 class FabricLogger():
 
-    def __init__(self, name, level=NOTSET, handlers = [], **kwargs):
+    def __init__(self, name, level=NOTSET, **kwargs):
         if not isinstance(name, str):
             raise TypeError('A logger name must be a string')
         
+        self.handlers = []
+
         self.name = name
         self.level = _checkLevel(level)
         self.disabled = False
         self.handlers = handlers
-
 
     def isEnabledFor(self, level):
         if self.disabled:
@@ -75,6 +123,8 @@ class FabricLogger():
             return True
 
     def addHandler(self, handler):
+        if not isinstance(handler, (CSVHandler)):
+            return TypeError(f"Handler {handler.name} is not recognized")
         self.handlers.append(handler)
 
     def debug(self, msg):
@@ -106,28 +156,24 @@ class FabricLogger():
         if kwargs is not None:
             for key in kwargs:
                 if (key in ["name","message","level","asctime"]):
-                    raise KeyError("Attempt to overwrite %r in LogRecord" % key)
+                    raise KeyError(f"Attempt to overwrite {key} in LogRecord")
 
         rv = LogRecord(name, level, message)
 
         return rv
     
     def handle(self, record):
-
         if self.disabled:
             return
-
-        #if isinstance(maybe_record, LogRecord):
-        #    record = maybe_record
-        self.callHandlers(record)
+        if isinstance(record, LogRecord):
+            self.callHandlers(record)
+        return
 
     def callHandlers(self, record):
-        c = self
-        #while c:
-        for hdlr in c.handlers:
+        for hdlr in self.handlers:
             if record.levelnumber >= hdlr.level:
                 hdlr.handle(record)
-                
+                                    
 class LogRecord:
 
     def __init__(self, name, level, message, **kwargs):
@@ -144,73 +190,15 @@ class LogRecord:
             'levelname': {"value":self.levelname, "dtype":"<class 'str'>"},
             'levelnumber': {"value":self.levelnumber, "dtype":"<class 'int'>"},
         }
-        LogRecord_as_dict.update({str(key):{value:v, dtype: str(type(v))} for (key,v) in self.kwargs.items()})
+        LogRecord_as_dict.update({str(key):{"value":v, "dtype": str(type(v))} for (key,v) in self.kwargs.items()})
 
         return LogRecord_as_dict
     
-    #def return_as_table(self): 
-    #    mssparkutils.fs.put(self.full_path, "")
-
     def list_schema(self):
         return self.return_as_dict().keys()
 
     def list_values(self):
         return [d["value"] for d in self.return_as_dict().values()]
 
-class CSVHandler:
-
-    def __init__(self, handler_name, file_name = "", path = "", delta_table = "",level=NOTSET):
-        self.level = level
-        self.handler_name = handler_name
-
-        if not file_name:
-            self.file_name = f"/{handler_name}_{datetime.today().strftime('%Y-%m-%d')}.csv"
-        else:
-            self.file_name = file_name
-
-        if not path:
-            self.path = f"Files/LogHandler/{self.handler_name}"
-        else:
-            self.path = path
-
-        self.full_path = self.path + self.file_name
-
-        if not delta_table:
-            self.delta_table = self.handler_name
-        else:
-            self.delta_table = delta_table
-
-    def handle(self, record):
-        rv = record
-        if isinstance(rv, LogRecord):
-            record = rv
-        if rv:
-            self.emit(record)
-        return rv
-
-    def check_if_log_file_exists(self, full_path):     
-        return mssparkutils.fs.exists(full_path)
-
-    def emit(self, record):
-        if not self.check_if_log_file_exists(self.full_path):
-            mssparkutils.fs.put(self.full_path, self.create_csv_header(record.list_schema())) 
-            
-       mssparkutils.fs.append(self.full_path, """\n""" + ",".join(str(value) for value in record.list_values()), True)
-
-    def create_csv_header(self, record_headers,delimiter = ","):
-        return delimiter.join(record_headers)
-
-    def commit_csv_to_delta(self, fiilter=""):
-        
-        if not self.check_if_log_file_exists(self.full_path):
-            raise Exception("Cannot find CSV to commit.")
-
-        df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
-        df.write.format("delta").mode("overwrite").save(f"Tables/{self.delta_table}")
-        
-class StructuredStreamHandler():
-
-    def __init__(self, abfs_path):
-        self.abfs_path = abfs_path
 
 
