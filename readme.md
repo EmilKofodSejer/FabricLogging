@@ -1,3 +1,5 @@
+The library can be implemented by including the code in a notebook in Fabric but you should include the semantic link library %pip install semantic-link  
+
 # FabrigLogger class
 
 The FabricLogger class is the entrance for error messages, all LogRecords are passed through the FabricLogger class to the handlers.
