@@ -8,3 +8,12 @@ The object for everything we log, it mostly just unites all the variables necess
 
 # CSVHandler 
 
+# Quick guide
+
+logger = FabricLogger("Logger", workspace_name = True, notebook_name = True)
+csv_log = CSVHandler("csvhandler")
+logger.addHandler(csv_log)
+
+logger.debug("Debug message")
+
+csv_log.commit_csv_to_delta
