@@ -12,7 +12,7 @@ The object for everything we log, it mostly just unites all the variables necess
 
 Essentially this is how you set it up 
 
-logger = FabricLogger("Logger", workspace_name = True, notebook_name = True)
+`logger = FabricLogger("Logger", workspace_name = True, notebook_name = True)
 csv_log = CSVHandler("csvhandler")
 logger.addHandler(csv_log)
 
@@ -22,5 +22,5 @@ logger.warning("Warning message")
 logger.error("Error message")
 logger.critical("Critical message")
 
-csv_log.commit_csv_to_delta
+csv_log.commit_csv_to_delta`
 
