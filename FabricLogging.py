@@ -29,6 +29,7 @@ _nameToLevel = {
     'NOTSET': NOTSET,
 }
 
+
 def _checkLevel(level):
     if isinstance(level, int):
         rv = level
@@ -41,6 +42,7 @@ def _checkLevel(level):
                         % (level,))
     return rv
 
+
 def getLevelName(level):
     result = _levelToName.get(level)
     if result is not None:
@@ -50,9 +52,11 @@ def getLevelName(level):
         return result
     return f"Level {level}"
 
+
 class Filter():
     def __init__(self, name):
         self.name = name
+
 
 class CSVHandler:
 
@@ -103,6 +107,7 @@ class CSVHandler:
 
         df = spark.read.format("csv").option("header", "true").option("inferSchema", "true").load(self.full_path)
         df.write.format("delta").mode("overwrite").save(f"Tables/{delta_table}")
+
 
 class FabricLogger():
 
@@ -203,7 +208,8 @@ class FabricLogger():
         for hdlr in self.handlers:
             if record.levelnumber >= hdlr.level:
                 hdlr.handle(record)
-                                    
+
+
 class LogRecord:
 
     def __init__(self, name, level, message, config,**kwargs):
